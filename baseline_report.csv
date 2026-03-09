@@ -1,0 +1,3 @@
+image,total_detections,classes_detected
+image_1.jpg,14,"car:3, person:9, traffic light:1, umbrella:1"
+image_2.jpg,30,"backpack:3, bench:4, bicycle:3, handbag:2, person:18"
