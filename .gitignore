@@ -1,7 +1,85 @@
-.venv/
-venv/
+# =========================
+# Python
+# =========================
 __pycache__/
 *.pyc
-.DS_Store
+*.pyo
+*.pyd
+*.py[cod]
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# =========================
+# IDE / Editor
+# =========================
 .vscode/
 .idea/
+*.swp
+*.swo
+
+# =========================
+# OS files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Logs
+# =========================
+*.log
+
+# =========================
+# Data (VERY IMPORTANT)
+# =========================
+data/
+datasets/
+
+# If you want to keep placeholders:
+!data/**/.gitkeep
+!data/**/README.md
+
+# =========================
+# Model files (DO NOT PUSH)
+# =========================
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.weights
+
+# =========================
+# Training outputs
+# =========================
+runs/
+outputs/
+results/
+logs/
+
+# =========================
+# Images / generated results
+# =========================
+baseline_images/
+predictions/
+visualizations/
+
+# =========================
+# Jupyter Notebook checkpoints
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# Cache / temp
+# =========================
+.cache/
+tmp/
+temp/
+
+# =========================
+# Environment files
+# =========================
+.env
+.env.*

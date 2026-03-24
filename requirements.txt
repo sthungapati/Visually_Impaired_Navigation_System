@@ -1,4 +1,5 @@
 ultralytics
 torch
 opencv-python
+pyyaml
 

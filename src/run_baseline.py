@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -18,6 +19,18 @@ from pipeline.io_utils import (
 )
 from pipeline.reporting import write_detections_csv, write_detections_json, write_summary_csv
 from pipeline.viz import annotate_frame, annotate_image_file
+
+
+NAV_CRITICAL_CLASSES = [
+    "person",
+    "bicycle",
+    "car",
+    "motorcycle",
+    "bus",
+    "truck",
+    "traffic light",
+    "stop sign",
+]
 
 
 def parse_classes(value: Optional[str]) -> Optional[Sequence[str]]:
@@ -44,6 +57,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Base output folder (default: outputs/runs/<timestamp>).",
+    )
+    parser.add_argument(
+        "--run-name",
+        type=str,
+        default=None,
+        help="Optional run directory name under output base.",
     )
     parser.add_argument(
         "--model",
@@ -87,6 +106,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Comma-separated class ids or names to filter.",
     )
     parser.add_argument(
+        "--nav-critical",
+        action="store_true",
+        help=(
+            "Use navigation-critical COCO classes: person,bicycle,car,motorcycle,"
+            "bus,truck,traffic light,stop sign."
+        ),
+    )
+    parser.add_argument(
         "--max-items",
         type=int,
         default=None,
@@ -97,6 +124,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable verbose model output.",
     )
+    parser.add_argument(
+        "--progress-every",
+        type=int,
+        default=25,
+        help="Print progress every N images/frames (default: 25).",
+    )
     return parser
 
 
@@ -106,6 +139,7 @@ def run_on_images(
     run_paths: RunPaths,
     max_items: Optional[int],
     save_annotated: bool,
+    progress_every: int,
 ) -> List[Dict[str, Any]]:
     """Process a folder or single image and return detection results."""
     all_items: List[Dict[str, Any]] = []
@@ -114,13 +148,19 @@ def run_on_images(
     if not image_paths:
         raise RuntimeError(f"No image files found under {input_path}")
 
-    for img_path in image_paths:
+    total = len(image_paths)
+    print(f"Starting image inference for {total} item(s)...", flush=True)
+
+    for idx, img_path in enumerate(image_paths, start=1):
         item = detector.infer_image(img_path)
         all_items.append(item)
 
         if save_annotated:
             out_path = run_paths.annotated_dir / img_path.name
             annotate_image_file(img_path, item.get("detections", []), out_path)
+
+        if idx == 1 or idx % progress_every == 0 or idx == total:
+            print(f"[images] processed {idx}/{total}", flush=True)
 
     return all_items
 
@@ -131,6 +171,7 @@ def run_on_video(
     run_paths: RunPaths,
     max_items: Optional[int],
     save_annotated: bool,
+    progress_every: int,
 ) -> List[Dict[str, Any]]:
     """Process a video file frame-by-frame and return detection results."""
     cap = cv2.VideoCapture(str(video_path))
@@ -169,6 +210,8 @@ def run_on_video(
                 writer.write(annotated_frame)
 
             frame_idx += 1
+            if frame_idx == 1 or frame_idx % progress_every == 0:
+                print(f"[video] processed frame {frame_idx}", flush=True)
             if max_items is not None and frame_idx >= max_items:
                 break
     finally:
@@ -208,12 +251,15 @@ def main(args: Optional[Sequence[str]] = None) -> None:
         raise FileNotFoundError(f"Input path does not exist: {input_path}")
 
     base_output = resolve_path(parsed.output) if parsed.output else None
-    run_paths = create_run_paths(base_output=base_output)
+    run_paths = create_run_paths(base_output=base_output, run_name=parsed.run_name)
 
     source_type = guess_source_type(input_path)
 
     classes = parse_classes(parsed.classes)
+    if parsed.nav_critical:
+        classes = NAV_CRITICAL_CLASSES
 
+    run_timestamp = datetime.now().isoformat(timespec="seconds")
     detector = YoloDetector(
         weights=parsed.model,
         imgsz=parsed.imgsz,
@@ -231,6 +277,7 @@ def main(args: Optional[Sequence[str]] = None) -> None:
             run_paths=run_paths,
             max_items=parsed.max_items,
             save_annotated=parsed.save_annotated,
+            progress_every=max(1, parsed.progress_every),
         )
     else:
         items = run_on_video(
@@ -239,14 +286,18 @@ def main(args: Optional[Sequence[str]] = None) -> None:
             run_paths=run_paths,
             max_items=parsed.max_items,
             save_annotated=parsed.save_annotated,
+            progress_every=max(1, parsed.progress_every),
         )
 
     # Build run metadata and write logs.
     total_detections = sum(len(i.get("detections", [])) for i in items)
     run_metadata: Dict[str, Any] = {
         "run_id": run_paths.run_id,
+        "timestamp": run_timestamp,
+        "run_timestamp": run_timestamp,
         "source_type": source_type,
         "input_path": str(input_path),
+        "output_path": str(run_paths.run_dir),
         "model": parsed.model,
         "imgsz": parsed.imgsz,
         "conf": parsed.conf,

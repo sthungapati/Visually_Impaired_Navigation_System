@@ -52,8 +52,67 @@ Key options:
 
 - `--conf`, `--iou`, `--imgsz`, `--model`, `--device` – standard YOLO inference settings.
 - `--classes` – comma-separated class names or ids to filter (e.g. `person,car,traffic light`).
+- `--nav-critical` – shortcut for `person,bicycle,car,motorcycle,bus,truck,traffic light,stop sign`.
+- `--run-name` – fixed run folder name (e.g. `mapillary_eval_all`).
 - `--max-items` – quick smoke runs (limit number of images or frames).
 - `--save-annotated` – write annotated images / video to the run folder.
 
 At the end of each run, the script prints a small smoke-test summary (number of items processed, total detections, and top-5 classes) and the path to the run's output folder.
+
+### Mapillary Vistas validation-only baseline
+
+Use the extracted validation images path:
+
+```bash
+python src/run_baseline.py --input "data/mapillary_vistas/Mapillary Vistas/validation/images" --save-annotated --run-name mapillary_eval_all
+python src/run_baseline.py --input "data/mapillary_vistas/Mapillary Vistas/validation/images" --save-annotated --nav-critical --run-name mapillary_eval_filtered
+```
+
+### Compare two runs
+
+```bash
+python src/compare_runs.py --run-a outputs/runs/mapillary_eval_all --label-a mapillary_all --run-b outputs/runs/mapillary_eval_filtered --label-b mapillary_filtered --top-k 10
+```
+
+---
+
+### Phase 2: Fine-tune YOLOv8 on Mapillary (navigation subset)
+
+Phase 1 inference code is unchanged. Phase 2 adds:
+
+- `configs/mapillary_nav_classes.yaml` – navigation-focused class plan and Mapillary label → YOLO name mapping.
+- `src/prepare_mapillary_yolo.py` – reads `v2.0/polygons/*.json`, converts polygons to axis-aligned boxes, writes YOLO labels.
+- `src/train_mapillary_yolo.py` – thin wrapper around Ultralytics `YOLO.train()`.
+
+**1) Prepare the YOLO dataset** (training split → `train/`, validation split → `val/`):
+
+```bash
+python src/prepare_mapillary_yolo.py --mapillary-root "data/mapillary_vistas/Mapillary Vistas" --config configs/mapillary_nav_classes.yaml --output data/mapillary_yolo
+```
+
+Quick smoke test (few images):
+
+```bash
+python src/prepare_mapillary_yolo.py --max-train 200 --max-val 50
+```
+
+**2) Train** (start small; adjust `--epochs`, `--batch`, `--device`):
+
+```bash
+python src/train_mapillary_yolo.py --data data/mapillary_yolo/data.yaml --model yolov8n.pt --epochs 30 --imgsz 640 --batch 8 --project runs/train --name mapillary_nav_v1
+```
+
+**3) Run inference with the fine-tuned weights** (same Phase 1 pipeline; `--model` points to `best.pt`):
+
+```bash
+python src/run_baseline.py --input "data/mapillary_vistas/Mapillary Vistas/validation/images" --model runs/train/mapillary_nav_v1/weights/best.pt --save-annotated --run-name mapillary_finetuned_eval
+```
+
+**4) Compare baseline vs fine-tuned** (same eval images, different `--model` / `--run-name`):
+
+```bash
+python src/compare_runs.py --run-a outputs/runs/mapillary_eval_all --label-a pretrained --run-b outputs/runs/mapillary_finetuned_eval --label-b finetuned --top-k 15
+```
+
+Note: COCO-pretrained class names differ from this 15-class head; for quantitative comparison on **this** label set, use validation mAP from training or a separate evaluator. Qualitative comparison of annotated outputs is still useful for navigation failures (poles, signs, trees, etc.).
 

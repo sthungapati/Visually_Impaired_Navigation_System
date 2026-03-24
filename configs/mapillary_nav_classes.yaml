@@ -1,0 +1,88 @@
+# Mapillary Vistas v2.0 → YOLO fine-tuning class plan (navigation-focused subset).
+# Multiple Mapillary label strings can map to the same YOLO class id.
+#
+# Phase 2: use this file with src/prepare_mapillary_yolo.py
+
+version: 1
+
+description: >
+  First-pass subset for visually impaired urban navigation: vehicles, lights,
+  signs, poles, vegetation, barriers, crosswalks, and walkway edges.
+  Not the full Mapillary taxonomy.
+
+# YOLO class indices 0..N-1 and final training names (order matters).
+names:
+  0: person
+  1: bicycle
+  2: car
+  3: bus
+  4: truck
+  5: motorcycle
+  6: traffic_light
+  7: traffic_sign
+  8: signboard
+  9: pole
+  10: tree
+  11: rail_fence
+  12: crosswalk
+  13: curb
+  14: sidewalk
+
+# Exact Mapillary v2.0 "label" strings (from polygon JSON) → YOLO name (must match names above).
+mapillary_to_yolo:
+  # People & riders
+  human--person--individual: person
+  human--rider--bicyclist: bicycle
+  human--rider--motorcyclist: motorcycle
+  human--rider--other-rider: bicycle
+
+  # Vehicles
+  object--vehicle--bicycle: bicycle
+  object--vehicle--car: car
+  object--vehicle--bus: bus
+  object--vehicle--truck: truck
+  object--vehicle--motorcycle: motorcycle
+
+  # Traffic lights (all subtypes → one class)
+  object--traffic-light--general-single: traffic_light
+  object--traffic-light--pedestrians: traffic_light
+  object--traffic-light--general-upright: traffic_light
+  object--traffic-light--general-horizontal: traffic_light
+  object--traffic-light--cyclists: traffic_light
+  object--traffic-light--other: traffic_light
+
+  # Traffic signs (front/back/direction variants → one class)
+  object--traffic-sign--front: traffic_sign
+  object--traffic-sign--back: traffic_sign
+  object--traffic-sign--direction-front: traffic_sign
+  object--traffic-sign--direction-back: traffic_sign
+  object--traffic-sign--information-parking: traffic_sign
+  object--traffic-sign--temporary-front: traffic_sign
+  object--traffic-sign--temporary-back: traffic_sign
+
+  # Signboards / storefront & info signs
+  object--sign--advertisement: signboard
+  object--sign--information: signboard
+  object--sign--other: signboard
+  object--sign--store: signboard
+
+  # Poles & supports
+  object--support--pole: pole
+  object--support--utility-pole: pole
+
+  # Trees / vegetation
+  nature--vegetation: tree
+
+  # Barriers / railings
+  construction--barrier--fence: rail_fence
+  construction--barrier--guard-rail: rail_fence
+
+  # Crosswalk-related (markings + plain crosswalk)
+  construction--flat--crosswalk-plain: crosswalk
+  marking--discrete--crosswalk-zebra: crosswalk
+  marking-only--discrete--crosswalk-zebra: crosswalk
+
+  # Walkway edges
+  construction--barrier--curb: curb
+  construction--flat--sidewalk: sidewalk
+  construction--flat--curb-cut: sidewalk
