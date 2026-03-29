@@ -96,6 +96,17 @@ Quick smoke test (few images):
 python src/prepare_mapillary_yolo.py --max-train 200 --max-val 50
 ```
 
+**Smaller / faster local training (recommended before a full GPU run):** use a **random subset** so it is not biased toward filenames A–Z. Write to a separate folder so you keep the full YOLO export for later:
+
+```bash
+python src/prepare_mapillary_yolo.py --output data/mapillary_yolo_subset --max-train 3000 --max-val 400 --shuffle-seed 42
+python src/train_mapillary_yolo.py --data data/mapillary_yolo_subset/data.yaml --model yolov8n.pt --epochs 10 --batch 8 --project runs/train --name mapillary_nav_subset
+```
+
+To free disk space, you can **delete** `data/mapillary_yolo/images/` and `labels/` (or the whole `data/mapillary_yolo/` folder) and re-run `prepare_mapillary_yolo.py` when needed. Do **not** delete `data/mapillary_vistas/` until you no longer need the original Mapillary extract for full training.
+
+**GPU server without the full original Mapillary:** you do **not** need `data/mapillary_vistas/` on the cluster. Run `prepare_mapillary_yolo.py` once on a machine that has the extract (use `--max-train` / `--max-val` / `--shuffle-seed` to cap size). Then copy **only** the prepared folder, e.g. `data/mapillary_yolo_subset/` (contains `images/`, `labels/`, `data.yaml`, `class_map.json`), plus this repo’s `src/`, `configs/`, and `requirements.txt`. Training uses **only** that YOLO folder—not polygons, panoptic, or the zip. Increase subset sizes later if you can transfer more data.
+
 **2) Train** (start small; adjust `--epochs`, `--batch`, `--device`):
 
 ```bash

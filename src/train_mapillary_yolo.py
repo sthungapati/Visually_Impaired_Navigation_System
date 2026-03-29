@@ -7,9 +7,43 @@ Uses Ultralytics training API. Does not modify Phase 1 inference code.
 from __future__ import annotations
 
 import argparse
+import tempfile
 from pathlib import Path
 
+import yaml
 from ultralytics import YOLO
+
+
+def data_yaml_for_ultralytics(data_yaml: Path) -> Path:
+    """Return a yaml path Ultralytics can load: ``path`` = absolute dataset root.
+
+    Older ``data.yaml`` files used ``path: .``, which is resolved from CWD and breaks
+    (e.g. looks for ``<repo>/images/val`` instead of ``<repo>/data/mapillary_yolo/images/val``).
+    """
+    data_yaml = data_yaml.resolve()
+    with data_yaml.open("r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+
+    if not isinstance(cfg, dict):
+        raise ValueError(f"Invalid data yaml: {data_yaml}")
+
+    dataset_root = data_yaml.parent.resolve()
+    cfg["path"] = str(dataset_root).replace("\\", "/")
+
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".yaml",
+        delete=False,
+        encoding="utf-8",
+    )
+    try:
+        yaml.safe_dump(cfg, tmp, sort_keys=False, allow_unicode=True)
+        tmp.close()
+    except Exception:
+        tmp.close()
+        Path(tmp.name).unlink(missing_ok=True)
+        raise
+    return Path(tmp.name)
 
 
 def main() -> None:
@@ -65,20 +99,25 @@ def main() -> None:
     if not data_path.is_file():
         raise FileNotFoundError(f"data.yaml not found: {data_path}")
 
-    model = YOLO(args.model)
-    results = model.train(
-        data=str(data_path),
-        epochs=args.epochs,
-        imgsz=args.imgsz,
-        batch=args.batch,
-        device=args.device,
-        project=args.project,
-        name=args.name,
-        patience=args.patience,
-        workers=args.workers,
-    )
+    fixed_yaml = data_yaml_for_ultralytics(data_path)
+    project_root = Path(args.project).resolve()
+    try:
+        model = YOLO(args.model)
+        model.train(
+            data=str(fixed_yaml),
+            epochs=args.epochs,
+            imgsz=args.imgsz,
+            batch=args.batch,
+            device=args.device,
+            project=str(project_root),
+            name=args.name,
+            patience=args.patience,
+            workers=args.workers,
+        )
+    finally:
+        fixed_yaml.unlink(missing_ok=True)
 
-    save_dir = Path(args.project) / args.name
+    save_dir = project_root / args.name
     best_pt = save_dir / "weights" / "best.pt"
     last_pt = save_dir / "weights" / "last.pt"
 

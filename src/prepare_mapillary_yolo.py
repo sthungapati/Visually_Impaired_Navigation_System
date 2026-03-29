@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import shutil
 from collections import Counter
 from pathlib import Path
@@ -83,6 +84,7 @@ def process_split(
     name_to_id: Dict[str, int],
     copy_mode: str,
     max_images: Optional[int],
+    shuffle_seed: Optional[int],
 ) -> Tuple[int, int, Counter]:
     """Copy images and write YOLO labels. Returns (images_written, labels_lines, class_counts)."""
     out_images.mkdir(parents=True, exist_ok=True)
@@ -92,6 +94,9 @@ def process_split(
     for ext in IMAGE_EXTENSIONS:
         image_paths.extend(sorted(images_dir.glob(f"*{ext}")))
     image_paths = sorted(set(image_paths))
+    if shuffle_seed is not None:
+        rng = random.Random(shuffle_seed)
+        rng.shuffle(image_paths)
     if max_images is not None:
         image_paths = image_paths[: max_images]
 
@@ -158,11 +163,17 @@ def write_data_yaml(
     out_root: Path,
     id_to_name: Dict[int, str],
 ) -> Path:
-    """Write Ultralytics-style data.yaml (path relative to this file for portability)."""
+    """Write Ultralytics-style data.yaml.
+
+    ``path`` must be the absolute dataset root. Ultralytics resolves ``path: .``
+    against the *process* current working directory, not the yaml file's folder,
+    which breaks training when launched from the repo root.
+    """
     names_block: Dict[str, str] = {str(i): id_to_name[i] for i in sorted(id_to_name.keys())}
+    root = str(out_root.resolve()).replace("\\", "/")
 
     payload = {
-        "path": ".",
+        "path": root,
         "train": "images/train",
         "val": "images/val",
         "names": names_block,
@@ -193,7 +204,7 @@ def write_class_map_json(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Prepare Mapillary → YOLO dataset for fine-tuning.")
+    parser = argparse.ArgumentParser(description="Prepare Mapillary -> YOLO dataset for fine-tuning.")
     parser.add_argument(
         "--mapillary-root",
         type=str,
@@ -230,6 +241,15 @@ def main() -> None:
         default=None,
         help="Optional cap on validation images (debug).",
     )
+    parser.add_argument(
+        "--shuffle-seed",
+        type=int,
+        default=None,
+        help=(
+            "If set, shuffle image order before applying --max-train / --max-val "
+            "(reproducible random subset; recommended over alphabetical first-N)."
+        ),
+    )
     args = parser.parse_args()
 
     root = Path(args.mapillary_root).resolve()
@@ -259,6 +279,9 @@ def main() -> None:
     print(f"Classes:        {len(id_to_name)} ({', '.join(id_to_name[i] for i in sorted(id_to_name))})")
     print()
 
+    train_seed = args.shuffle_seed
+    val_seed = (args.shuffle_seed + 10_000) if args.shuffle_seed is not None else None
+
     n_tr, lines_tr, ctr_tr = process_split(
         "train",
         train_img,
@@ -269,6 +292,7 @@ def main() -> None:
         name_to_id,
         args.copy_mode,
         args.max_train,
+        train_seed,
     )
     n_va, lines_va, ctr_va = process_split(
         "val",
@@ -280,6 +304,7 @@ def main() -> None:
         name_to_id,
         args.copy_mode,
         args.max_val,
+        val_seed,
     )
 
     yaml_path = write_data_yaml(out_root, id_to_name)
