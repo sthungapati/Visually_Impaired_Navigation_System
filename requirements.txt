@@ -2,4 +2,5 @@ ultralytics
 torch
 opencv-python
 pyyaml
+pyttsx3
 
