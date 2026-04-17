@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from datetime import datetime
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -15,11 +15,18 @@ from pipeline.io_utils import (
     create_run_paths,
     guess_source_type,
     iter_image_files,
+    iter_video_files,
     resolve_path,
 )
 from pipeline.reporting import write_detections_csv, write_detections_json, write_summary_csv
 from pipeline.viz import annotate_frame, annotate_image_file
 
+
+REPO_TEST_CLIP_NAMES = (
+    "3987696-hd_1920_1080_24fps.mp4",
+    "5744823-uhd_2160_3840_24fps.mp4",
+    "6082601-uhd_2160_3840_24fps.mp4",
+)
 
 NAV_CRITICAL_CLASSES = [
     "person",
@@ -41,16 +48,38 @@ def parse_classes(value: Optional[str]) -> Optional[Sequence[str]]:
     return parts or None
 
 
+def repo_root() -> Path:
+    """Project root (parent of ``src``)."""
+    return Path(__file__).resolve().parent.parent
+
+
+def default_repo_clip_paths() -> List[Path]:
+    """Paths to sample MP4 clips in the repo root, if those files exist."""
+    root = repo_root()
+    return [root / name for name in REPO_TEST_CLIP_NAMES if (root / name).is_file()]
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
         description="YOLOv8 baseline detection pipeline for urban navigation.",
     )
-    parser.add_argument(
+    src_group = parser.add_mutually_exclusive_group(required=True)
+    src_group.add_argument(
         "--input",
+        nargs="+",
         type=str,
-        required=True,
-        help="Path to input folder of images or a single video file.",
+        help=(
+            "One or more paths: image folder, folder of videos, single image, or video file."
+        ),
+    )
+    src_group.add_argument(
+        "--repo-clips",
+        action="store_true",
+        help=(
+            "Run on the three sample MP4 files in the project root "
+            f"({', '.join(REPO_TEST_CLIP_NAMES)}), if present."
+        ),
     )
     parser.add_argument(
         "--output",
@@ -234,11 +263,22 @@ def compute_smoke_stats(items: List[Dict[str, Any]]) -> Dict[str, Any]:
             total_dets += 1
 
     top5 = class_counter.most_common(5)
+    unique_classes = sorted(class_counter.keys())
     return {
         "num_items": num_items,
         "total_detections": total_dets,
         "top_classes": top5,
+        "unique_classes": unique_classes,
     }
+
+
+def compute_stats_by_source(items: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Smoke stats grouped by ``source_name`` (e.g. per input video)."""
+    by_source: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for item in items:
+        key = str(item.get("source_name") or "")
+        by_source[key].append(item)
+    return {name: compute_smoke_stats(sub) for name, sub in sorted(by_source.items())}
 
 
 def main(args: Optional[Sequence[str]] = None) -> None:
@@ -246,14 +286,21 @@ def main(args: Optional[Sequence[str]] = None) -> None:
     parser = build_arg_parser()
     parsed = parser.parse_args(args=args)
 
-    input_path = resolve_path(parsed.input)
-    if not input_path.exists():
-        raise FileNotFoundError(f"Input path does not exist: {input_path}")
+    if parsed.repo_clips:
+        input_paths = default_repo_clip_paths()
+        if not input_paths:
+            raise FileNotFoundError(
+                "No default test clips found in repo root. Expected one or more of: "
+                + ", ".join(REPO_TEST_CLIP_NAMES)
+            )
+    else:
+        input_paths = [resolve_path(p) for p in parsed.input]
+        for p in input_paths:
+            if not p.exists():
+                raise FileNotFoundError(f"Input path does not exist: {p}")
 
     base_output = resolve_path(parsed.output) if parsed.output else None
     run_paths = create_run_paths(base_output=base_output, run_name=parsed.run_name)
-
-    source_type = guess_source_type(input_path)
 
     classes = parse_classes(parsed.classes)
     if parsed.nav_critical:
@@ -270,24 +317,59 @@ def main(args: Optional[Sequence[str]] = None) -> None:
         verbose=parsed.verbose,
     )
 
-    if source_type == "image":
-        items = run_on_images(
-            detector=detector,
-            input_path=input_path,
-            run_paths=run_paths,
-            max_items=parsed.max_items,
-            save_annotated=parsed.save_annotated,
-            progress_every=max(1, parsed.progress_every),
-        )
-    else:
-        items = run_on_video(
-            detector=detector,
-            video_path=input_path,
-            run_paths=run_paths,
-            max_items=parsed.max_items,
-            save_annotated=parsed.save_annotated,
-            progress_every=max(1, parsed.progress_every),
-        )
+    items: List[Dict[str, Any]] = []
+    source_types_seen: List[str] = []
+    ran_video_input = False
+    max_items = parsed.max_items
+    progress_every = max(1, parsed.progress_every)
+
+    for input_path in input_paths:
+        source_type = guess_source_type(input_path)
+        source_types_seen.append(source_type)
+        print(f"\n=== Input: {input_path} ({source_type}) ===", flush=True)
+
+        if source_type == "image":
+            items.extend(
+                run_on_images(
+                    detector=detector,
+                    input_path=input_path,
+                    run_paths=run_paths,
+                    max_items=max_items,
+                    save_annotated=parsed.save_annotated,
+                    progress_every=progress_every,
+                )
+            )
+        elif source_type == "video":
+            ran_video_input = True
+            items.extend(
+                run_on_video(
+                    detector=detector,
+                    video_path=input_path,
+                    run_paths=run_paths,
+                    max_items=max_items,
+                    save_annotated=parsed.save_annotated,
+                    progress_every=progress_every,
+                )
+            )
+        elif source_type == "video_dir":
+            ran_video_input = True
+            video_paths = list(iter_video_files(input_path))
+            if not video_paths:
+                raise RuntimeError(f"No video files under {input_path}")
+            for vpath in video_paths:
+                print(f"\n--- Video: {vpath.name} ---", flush=True)
+                items.extend(
+                    run_on_video(
+                        detector=detector,
+                        video_path=vpath,
+                        run_paths=run_paths,
+                        max_items=max_items,
+                        save_annotated=parsed.save_annotated,
+                        progress_every=progress_every,
+                    )
+                )
+        else:
+            raise ValueError(f"Unsupported source type: {source_type}")
 
     # Build run metadata and write logs.
     total_detections = sum(len(i.get("detections", [])) for i in items)
@@ -295,8 +377,8 @@ def main(args: Optional[Sequence[str]] = None) -> None:
         "run_id": run_paths.run_id,
         "timestamp": run_timestamp,
         "run_timestamp": run_timestamp,
-        "source_type": source_type,
-        "input_path": str(input_path),
+        "source_types": source_types_seen,
+        "input_paths": [str(p) for p in input_paths],
         "output_path": str(run_paths.run_dir),
         "model": parsed.model,
         "imgsz": parsed.imgsz,
@@ -319,14 +401,33 @@ def main(args: Optional[Sequence[str]] = None) -> None:
 
     # Basic smoke-test stats (especially useful for image folders).
     stats = compute_smoke_stats(items)
+    print("\n=== Overall ===", flush=True)
     print(f"Processed items: {stats['num_items']}")
     print(f"Total detections: {stats['total_detections']}")
+    if stats["unique_classes"]:
+        print(f"Object classes identified (unique): {', '.join(stats['unique_classes'])}")
     if stats["top_classes"]:
         print("Top classes by count (name, count):")
         for name, count in stats["top_classes"]:
             print(f"  {name}: {count}")
 
-    print(f"Run outputs saved to: {run_paths.run_dir}")
+    by_src = compute_stats_by_source(items)
+    if ran_video_input or len(input_paths) > 1:
+        print("\n=== By video / source file ===", flush=True)
+        for src_name, s in by_src.items():
+            label = src_name or "(unknown)"
+            print(f"\n{label}:", flush=True)
+            print(f"  Frames/items: {s['num_items']}", flush=True)
+            if s["unique_classes"]:
+                print(f"  Objects identified: {', '.join(s['unique_classes'])}", flush=True)
+            else:
+                print("  Objects identified: (none above confidence threshold)", flush=True)
+            if s["top_classes"]:
+                print("  Top by count:", flush=True)
+                for cname, count in s["top_classes"]:
+                    print(f"    {cname}: {count}", flush=True)
+
+    print(f"\nRun outputs saved to: {run_paths.run_dir}")
 
 
 if __name__ == "__main__":

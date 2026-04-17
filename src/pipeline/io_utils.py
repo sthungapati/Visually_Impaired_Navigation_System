@@ -54,6 +54,32 @@ def iter_image_files(input_path: Path, max_items: Optional[int] = None) -> Itera
         raise FileNotFoundError(f"No valid image files found at {input_path}")
 
 
+def iter_video_files(input_path: Path, max_items: Optional[int] = None) -> Iterator[Path]:
+    """Yield video files from a directory or a single video path."""
+    count = 0
+
+    if input_path.is_dir():
+        candidates: List[Path] = []
+        for ext in VIDEO_EXTENSIONS:
+            candidates.extend(sorted(input_path.glob(f"*{ext}")))
+        for path in sorted(set(candidates)):
+            yield path
+            count += 1
+            if max_items is not None and count >= max_items:
+                break
+    elif is_video_file(input_path):
+        yield input_path
+    else:
+        raise FileNotFoundError(f"No valid video files found at {input_path}")
+
+
+def _dir_has_extension_group(path: Path, extensions: set[str]) -> bool:
+    for ext in extensions:
+        if any(path.glob(f"*{ext}")):
+            return True
+    return False
+
+
 def create_run_paths(
     base_output: Optional[Path] = None,
     run_name: Optional[str] = None,
@@ -79,9 +105,13 @@ def create_run_paths(
 
 
 def guess_source_type(input_path: Path) -> str:
-    """Return 'image' or 'video' based on the input path."""
+    """Return 'image', 'video', or 'video_dir' based on the input path."""
     if input_path.is_dir():
-        return "image"
+        if _dir_has_extension_group(input_path, IMAGE_EXTENSIONS):
+            return "image"
+        if _dir_has_extension_group(input_path, VIDEO_EXTENSIONS):
+            return "video_dir"
+        raise ValueError(f"No images or videos found in directory {input_path}")
     if is_video_file(input_path):
         return "video"
     if is_image_file(input_path):
