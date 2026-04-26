@@ -59,6 +59,42 @@ Key options:
 
 At the end of each run, the script prints a small smoke-test summary (number of items processed, total detections, and top-5 classes) and the path to the run's output folder.
 
+### Front-object spoken navigation (single clip)
+
+For the visually impaired navigation prototype, run the dedicated script:
+
+```bash
+python Visually_Impaired_Navigation_System/demo_navigation.py --headless
+```
+
+Default behavior now targets the WhatsApp clip in the repo root and announces only the object considered "right in front" (center-prioritized + near/proximity heuristic).
+
+Useful options:
+
+- `--front-only` (default) – announce only one front object.
+- `--all-objects` – disable front-only behavior.
+- `--whatsapp-clip` – force the WhatsApp clip path lookup.
+- `--source <path-or-0>` – use a different video file or webcam.
+- `--no-speak` – print detections without TTS.
+
+### Polished final demo prototype (presentation-ready)
+
+Run the polished assistant demo on a prerecorded outdoor video (defaults to the WhatsApp clip in repo root):
+
+```bash
+python Visually_Impaired_Navigation_System/presentation_demo.py --output-video outputs/presentation_demo/navigation_assistant_demo.mp4
+```
+
+Useful options:
+- `--display` to preview live while processing.
+- `--no-speak` to disable text-to-speech.
+- `--assistant-name "PathPilot AI"` to customize branding.
+- `--center-zone-ratio 0.34` to tune center walking zone width.
+- `--tts-cooldown 4.0` to reduce repeated messages.
+
+Design notes and tuning guidance are in:
+- `Visually_Impaired_Navigation_System/PROTOTYPE_GUIDE.md`
+
 ### Mapillary Vistas validation-only baseline
 
 Use the extracted validation images path:
