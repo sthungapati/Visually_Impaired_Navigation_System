@@ -66,6 +66,25 @@ def region_from_box(xyxy, frame_width: int, center_zone: Tuple[int, int]) -> str
     return "center"
 
 
+def sidestep_hint_suffix(xyxy, frame_w: int, *, min_offset_ratio: float = 0.04) -> str:
+    """
+    When the obstacle sits in the center band, suggest which way to step to pass.
+
+    Uses box center vs image center: obstacle biased left -> step right, and vice versa.
+    """
+    if frame_w <= 0:
+        return ""
+    cx = float(xyxy[0] + xyxy[2]) / 2.0
+    mid = float(frame_w) / 2.0
+    thresh = float(frame_w) * min_offset_ratio
+    delta = cx - mid
+    if delta < -thresh:
+        return " Step slightly right to go around."
+    if delta > thresh:
+        return " Step slightly left to go around."
+    return ""
+
+
 def _danger_score(det: Det, region: str, distance: DistanceEstimate) -> float:
     """
     Simple score (0-100) for obstacle importance in walking guidance.
@@ -133,6 +152,7 @@ def danger_level_from_score(score: float) -> str:
 def guidance_from_summaries(
     summaries: Sequence[DetectionSummary],
     *,
+    frame_w: int,
     assistant_name: str = "NavGuide AI",
 ) -> GuidanceState:
     """Produce final guidance text + panel metadata."""
@@ -150,11 +170,12 @@ def guidance_from_summaries(
     score = top.danger_score
     danger = danger_level_from_score(score)
     key = f"{top_name} ({top.distance.meters:.1f} m, {top.region})"
+    center_pass = sidestep_hint_suffix(top.det.xyxy, frame_w)
 
     if top.distance.safety_level == "stop" and top.region == "center":
-        text = "Stop. Object directly in front of you."
+        text = "Stop. Object directly in front of you." + center_pass
     elif top.distance.safety_level in ("stop", "caution") and top.region == "center":
-        text = f"There is a {top_name} ahead. Slow down."
+        text = f"There is a {top_name} ahead. Slow down." + center_pass
     elif top.distance.safety_level in ("stop", "caution") and top.region == "right":
         text = "Obstacle on your right. Move slightly left."
     elif top.distance.safety_level in ("stop", "caution") and top.region == "left":

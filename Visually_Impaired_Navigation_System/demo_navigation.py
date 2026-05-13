@@ -14,7 +14,7 @@ import sys
 import time
 from collections import Counter
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Set
 
 import cv2
 
@@ -39,7 +39,22 @@ WHATSAPP_CLIP_CANDIDATES = (
 
 
 def default_repo_clip_paths(repo: Path) -> List[Path]:
-    return [repo / name for name in REPO_TEST_CLIP_NAMES if (repo / name).is_file()]
+    """Named sample clips plus any ``video*.mp4`` in the repo root (deduplicated)."""
+    out: List[Path] = []
+    seen: Set[str] = set()
+    for name in REPO_TEST_CLIP_NAMES:
+        p = repo / name
+        if p.is_file():
+            key = str(p.resolve())
+            if key not in seen:
+                seen.add(key)
+                out.append(p)
+    for p in sorted(repo.glob("video*.mp4")):
+        key = str(p.resolve())
+        if key not in seen:
+            seen.add(key)
+            out.append(p)
+    return out
 
 
 def default_whatsapp_clip_path(repo: Path) -> Optional[Path]:
@@ -73,12 +88,38 @@ def pick_front_object(dets, frame_w: int, frame_h: int):
     )
 
 
-def _natural_phrase_for_object(class_name: str, distance_m: float, distance_ft: float, safety: str) -> str:
+def _sidestep_suffix(xyxy, frame_w: int, *, min_offset_ratio: float = 0.04) -> str:
+    """If the box center is left or right of image center, suggest passing the other way."""
+    if frame_w <= 0:
+        return ""
+    cx = float(xyxy[0] + xyxy[2]) / 2.0
+    mid = float(frame_w) / 2.0
+    thresh = float(frame_w) * min_offset_ratio
+    delta = cx - mid
+    if delta < -thresh:
+        return " Step slightly right to go around."
+    if delta > thresh:
+        return " Step slightly left to go around."
+    return ""
+
+
+def _natural_phrase_for_object(
+    class_name: str,
+    distance_m: float,
+    distance_ft: float,
+    safety: str,
+    *,
+    xyxy=None,
+    frame_w: Optional[int] = None,
+) -> str:
     obj = class_name.replace("_", " ")
+    extra = ""
+    if xyxy is not None and frame_w is not None and safety in ("stop", "caution"):
+        extra = _sidestep_suffix(xyxy, frame_w)
     if safety == "stop":
-        return f"Stop. {obj} ahead at about {distance_m:.1f} meters, {distance_ft:.0f} feet."
+        return f"Stop. {obj} ahead at about {distance_m:.1f} meters, {distance_ft:.0f} feet.{extra}"
     if safety == "caution":
-        return f"Caution. {obj} ahead at around {distance_m:.1f} meters, {distance_ft:.0f} feet."
+        return f"Caution. {obj} ahead at around {distance_m:.1f} meters, {distance_ft:.0f} feet.{extra}"
     if safety == "watch":
         return f"{obj} in front at about {distance_m:.1f} meters. Keep walking carefully."
     return "Path looks clear ahead. Keep walking, you are doing good."
@@ -134,7 +175,12 @@ def run_clip_batch(
                     )
                     dist = estimate_distance_from_box(primary.xyxy, h, w)
                     phrase = _natural_phrase_for_object(
-                        primary.name, dist.meters, dist.feet, dist.safety_level
+                        primary.name,
+                        dist.meters,
+                        dist.feet,
+                        dist.safety_level,
+                        xyxy=primary.xyxy,
+                        frame_w=w,
                     )
                     now = time.monotonic()
                     if speak_updates and now - last_speak >= speak_interval:
@@ -210,7 +256,7 @@ def main() -> None:
         default="whatsapp",
         help=(
             "0 for default webcam, path to a video file, 'whatsapp' for repo WhatsApp "
-            "clip, or 'clips' to batch sample MP4 files in the project root"
+            "clip, or 'clips' to batch named sample MP4s plus video*.mp4 in the project root"
         ),
     )
     parser.add_argument("--conf", type=float, default=0.25)
@@ -270,7 +316,8 @@ def main() -> None:
         clip_paths = default_repo_clip_paths(repo)
         if not clip_paths:
             raise RuntimeError(
-                "No sample clips in repo root. Expected: " + ", ".join(REPO_TEST_CLIP_NAMES)
+                "No sample clips in repo root. Add named samples or video*.mp4. "
+                "Named list: " + ", ".join(REPO_TEST_CLIP_NAMES)
             )
         engine = DetectionEngine(args.weights, conf=args.conf, device=args.device)
         run_clip_batch(
@@ -321,7 +368,12 @@ def main() -> None:
                 )
                 dist = estimate_distance_from_box(primary.xyxy, h, w)
                 phrase = _natural_phrase_for_object(
-                    primary.name, dist.meters, dist.feet, dist.safety_level
+                    primary.name,
+                    dist.meters,
+                    dist.feet,
+                    dist.safety_level,
+                    xyxy=primary.xyxy,
+                    frame_w=w,
                 )
                 now = time.monotonic()
                 if now - last_speak >= args.speak_interval:
