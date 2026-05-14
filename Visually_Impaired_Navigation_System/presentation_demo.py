@@ -80,9 +80,13 @@ def _open_writer(path: Path, fps: float, width: int, height: int):
     return cv2.VideoWriter(str(path), fourcc, fps, (width, height))
 
 
+USER_VIDEOS_DIR = "videos"
+
+
 def _repo_video_batch_paths(repo_root: Path) -> List[Path]:
-    """video1.mp4, video2.mp4, ... under repo root (parent of Visually_Impaired_Navigation_System)."""
-    paths = sorted(repo_root.glob("video*.mp4"))
+    """video1.mp4, video2.mp4, ... under ``<repo>/videos/``."""
+    user_dir = repo_root / USER_VIDEOS_DIR
+    paths = sorted(user_dir.glob("video*.mp4"))
     return [p for p in paths if p.is_file()]
 
 
@@ -227,7 +231,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--export-repo-videos",
         action="store_true",
         help=(
-            "Export one annotated MP4 per video*.mp4 in the repo root (next to yolov8n.pt). "
+            "Export one annotated MP4 per videos/video*.mp4 under the project root. "
             "Saves under --output-dir. Ignores --input-video / --output-video for naming."
         ),
     )
@@ -250,7 +254,7 @@ def main() -> None:
         inputs = _repo_video_batch_paths(repo_root)
         if not inputs:
             raise FileNotFoundError(
-                f"No video*.mp4 files found in repo root: {repo_root}"
+                f"No videos/video*.mp4 found under: {repo_root / USER_VIDEOS_DIR}"
             )
         out_dir = Path(args.output_dir)
         if not out_dir.is_absolute():

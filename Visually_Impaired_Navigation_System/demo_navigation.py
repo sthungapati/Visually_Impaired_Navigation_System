@@ -38,8 +38,11 @@ WHATSAPP_CLIP_CANDIDATES = (
 )
 
 
+USER_VIDEOS_DIR = "videos"
+
+
 def default_repo_clip_paths(repo: Path) -> List[Path]:
-    """Named sample clips plus any ``video*.mp4`` in the repo root (deduplicated)."""
+    """Named sample clips in repo root plus ``videos/video*.mp4`` (deduplicated)."""
     out: List[Path] = []
     seen: Set[str] = set()
     for name in REPO_TEST_CLIP_NAMES:
@@ -49,7 +52,8 @@ def default_repo_clip_paths(repo: Path) -> List[Path]:
             if key not in seen:
                 seen.add(key)
                 out.append(p)
-    for p in sorted(repo.glob("video*.mp4")):
+    user_dir = repo / USER_VIDEOS_DIR
+    for p in sorted(user_dir.glob("video*.mp4")):
         key = str(p.resolve())
         if key not in seen:
             seen.add(key)
@@ -256,7 +260,7 @@ def main() -> None:
         default="whatsapp",
         help=(
             "0 for default webcam, path to a video file, 'whatsapp' for repo WhatsApp "
-            "clip, or 'clips' to batch named sample MP4s plus video*.mp4 in the project root"
+            "clip, or 'clips' to batch named sample MP4s plus videos/video*.mp4 under project root"
         ),
     )
     parser.add_argument("--conf", type=float, default=0.25)
@@ -316,7 +320,7 @@ def main() -> None:
         clip_paths = default_repo_clip_paths(repo)
         if not clip_paths:
             raise RuntimeError(
-                "No sample clips in repo root. Add named samples or video*.mp4. "
+                "No sample clips in repo root. Add named samples or videos/video*.mp4. "
                 "Named list: " + ", ".join(REPO_TEST_CLIP_NAMES)
             )
         engine = DetectionEngine(args.weights, conf=args.conf, device=args.device)
